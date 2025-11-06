@@ -1,7 +1,7 @@
 # salary_app.py
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import BytesIO
 
 # -----------------------------
@@ -31,19 +31,42 @@ data = {
     ]
 }
 
-
 df = pd.DataFrame(data)
 
 # -----------------------------
 # Configuration
 # -----------------------------
-WORKING_DAYS_PER_YEAR = 247
 ON_COST_RATE = 0.377
 SALARY_INCREASE_DATE = datetime(2026,7,1)
 SALARY_INCREASE_RATE = 0.052
+ANNUAL_LEAVE_DAYS = 20
 
-df['Daily Salary'] = df['Yearly Salary'] / WORKING_DAYS_PER_YEAR
-df['Daily Salary (with on-costs)'] = df['Daily Salary'] * (1 + ON_COST_RATE)
+# Example 13 public holidays (update as needed)
+PUBLIC_HOLIDAYS = [
+    # NSW main holidays
+    (1,1), (26,1), (3,4), (6,4), (25,4), (8,6),
+    (3,8), (5,10), (25,12), (28,12),
+    # Adding 29, 30, 31 Dec
+    (29,12), (30,12), (31,12)
+]
+
+# -----------------------------
+# Helper: calculate working days dynamically
+# -----------------------------
+def calculate_working_days(start_date, end_date, public_holidays=PUBLIC_HOLIDAYS, annual_leave=ANNUAL_LEAVE_DAYS):
+    all_days = pd.date_range(start=start_date, end=end_date, freq='D')
+    weekdays = all_days[all_days.weekday < 5]  # Mon-Fri only
+    
+    # Remove public holidays
+    holidays_dates = []
+    for d in weekdays:
+        if (d.day, d.month) in public_holidays:
+            holidays_dates.append(d)
+    weekdays = [d for d in weekdays if d not in holidays_dates]
+    
+    # Subtract annual leave proportionally
+    total_working_days = max(len(weekdays) - annual_leave, 0)
+    return total_working_days
 
 # -----------------------------
 # Salary calculation function
@@ -53,20 +76,25 @@ def calculate_salary(level, base_level, start_date, end_date, fte=1.0):
     if row.empty:
         return {"Error": "No matching LEVEL and Base Level found."}
     
-    daily_salary = row['Daily Salary (with on-costs)'].values[0]
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
     
+    # Calculate working days before and after salary increase
     if end_date < SALARY_INCREASE_DATE:
-        days_before = (end_date - start_date).days + 1
+        days_before = calculate_working_days(start_date, end_date)
         days_after = 0
     elif start_date >= SALARY_INCREASE_DATE:
         days_before = 0
-        days_after = (end_date - start_date).days + 1
+        days_after = calculate_working_days(start_date, end_date)
     else:
-        days_before = (SALARY_INCREASE_DATE - start_date).days
-        days_after = (end_date - SALARY_INCREASE_DATE).days + 1
+        days_before = calculate_working_days(start_date, SALARY_INCREASE_DATE - timedelta(days=1))
+        days_after = calculate_working_days(SALARY_INCREASE_DATE, end_date)
     
+    # Daily salary with on-costs
+    yearly_salary = row['Yearly Salary'].values[0]
+    daily_salary = (yearly_salary / 227) * (1 + ON_COST_RATE)  # Using standard 227 base days
+    
+    # Apply salary increase
     salary_before = days_before * daily_salary * fte
     salary_after = days_after * daily_salary * (1 + SALARY_INCREASE_RATE) * fte
     total_salary = salary_before + salary_after
@@ -77,8 +105,8 @@ def calculate_salary(level, base_level, start_date, end_date, fte=1.0):
         "Start Date": start_date.date(),
         "End Date": end_date.date(),
         "FTE": fte,
-        "Days Before 1 Jul 2026": days_before,
-        "Days After 1 Jul 2026": days_after,
+        "Days Before Increase": days_before,
+        "Days After Increase": days_after,
         "Daily Salary (with costs)": round(daily_salary,2),
         "Total Salary": round(total_salary,2)
     }
@@ -86,7 +114,7 @@ def calculate_salary(level, base_level, start_date, end_date, fte=1.0):
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.title("Interactive Salary Calculator (2025–2026)")
+st.title("Interactive Salary Calculator")
 
 level = st.selectbox("Select LEVEL:", sorted(df['LEVEL'].unique()))
 base_level = st.selectbox("Select Base Level:", sorted(df['Base Level'].unique()))
@@ -110,5 +138,6 @@ if st.button("Calculate Salary"):
         file_name="salary_details.csv",
         mime="text/csv"
     )
+
 
 
