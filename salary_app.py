@@ -1,7 +1,6 @@
-# salary_app.py
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from io import BytesIO
 
 # -----------------------------
@@ -30,103 +29,98 @@ data = {
         209591.11
     ]
 }
-
 df = pd.DataFrame(data)
 
 # -----------------------------
-# Configuration
+# Constants
 # -----------------------------
 ON_COST_RATE = 0.377
 SALARY_INCREASE_DATE = datetime(2026,7,1)
-SALARY_INCREASE_RATE = 0.052
-ANNUAL_LEAVE_DAYS = 20
-WORKING_DAYS_PER_YEAR = 227  # Base for daily salary calculation
-
-# Example 13 public holidays (unpaid)
-PUBLIC_HOLIDAYS = [
-    (1,1), (26,1), (3,4), (6,4), (25,4), (8,6),
-    (3,8), (5,10), (25,12), (28,12),
-    (29,12), (30,12), (31,12)
-]
+SALARY_INCREASE_RATE = 0.052   # 5.2% increase
+WORKING_DAYS_PER_YEAR = 227
+ANNUAL_LEAVE_DAYS_PER_YEAR = 20
+TOTAL_PAID_DAYS_PER_YEAR = WORKING_DAYS_PER_YEAR + ANNUAL_LEAVE_DAYS_PER_YEAR
 
 # -----------------------------
-# Helper: calculate paid working days (excluding public holidays, adding annual leave)
-# -----------------------------
-def calculate_paid_days(start_date, end_date, public_holidays=PUBLIC_HOLIDAYS, annual_leave=ANNUAL_LEAVE_DAYS):
-    all_days = pd.date_range(start=start_date, end=end_date, freq='D')
-    weekdays = all_days[all_days.weekday < 5]  # Mon-Fri
-    
-    # Remove public holidays
-    holidays_dates = [d for d in weekdays if (d.day, d.month) in public_holidays]
-    working_days = [d for d in weekdays if d not in holidays_dates]
-    
-    # Total paid days = working days + annual leave
-    total_paid_days = len(working_days) + annual_leave
-    
-    return len(working_days), total_paid_days
-
-# -----------------------------
-# Salary calculation function
+# Salary Calculation Function
 # -----------------------------
 def calculate_salary(level, base_level, start_date, end_date, fte=1.0):
     row = df[(df['LEVEL'] == level.upper()) & (df['Base Level'] == base_level.title())]
     if row.empty:
         return {"Error": "No matching LEVEL and Base Level found."}
-    
+
+    yearly_salary = row['Yearly Salary'].values[0]
     start_date = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
-    
-    # Calculate working days and total paid days before and after salary increase
+    total_days = (end_date - start_date).days + 1
+    if total_days <= 0:
+        return {"Error": "End date must be after start date."}
+
+    # Split duration relative to salary increase date
     if end_date < SALARY_INCREASE_DATE:
-        work_before, paid_before = calculate_paid_days(start_date, end_date)
-        work_after, paid_after = 0, 0
+        days_before, days_after = total_days, 0
     elif start_date >= SALARY_INCREASE_DATE:
-        work_before, paid_before = 0, 0
-        work_after, paid_after = calculate_paid_days(start_date, end_date)
+        days_before, days_after = 0, total_days
     else:
-        work_before, paid_before = calculate_paid_days(start_date, SALARY_INCREASE_DATE - timedelta(days=1))
-        work_after, paid_after = calculate_paid_days(SALARY_INCREASE_DATE, end_date)
-    
-    # Daily salary with on-costs
-    yearly_salary = row['Yearly Salary'].values[0]
-    daily_salary = (yearly_salary / WORKING_DAYS_PER_YEAR) * (1 + ON_COST_RATE)
-    
-    # Calculate salary
-    salary_before = paid_before * daily_salary * fte
-    salary_after = paid_after * daily_salary * (1 + SALARY_INCREASE_RATE) * fte
+        days_before = (SALARY_INCREASE_DATE - start_date).days
+        days_after = total_days - days_before
+
+    # Daily rate (with on-costs)
+    daily_rate_with_costs = (yearly_salary / WORKING_DAYS_PER_YEAR) * (1 + ON_COST_RATE)
+
+    # Proportion of year worked before and after increase
+    year_fraction_before = days_before / 365
+    year_fraction_after = days_after / 365
+
+    # Working and annual leave days (pro-rated)
+    working_days_before = WORKING_DAYS_PER_YEAR * year_fraction_before
+    working_days_after = WORKING_DAYS_PER_YEAR * year_fraction_after
+    annual_leave_before = ANNUAL_LEAVE_DAYS_PER_YEAR * year_fraction_before
+    annual_leave_after = ANNUAL_LEAVE_DAYS_PER_YEAR * year_fraction_after
+
+    # Paid days
+    paid_days_before = working_days_before + annual_leave_before
+    paid_days_after = working_days_after + annual_leave_after
+    total_paid_days = paid_days_before + paid_days_after
+
+    # Salaries
+    salary_before = paid_days_before * daily_rate_with_costs * fte
+    salary_after = paid_days_after * daily_rate_with_costs * (1 + SALARY_INCREASE_RATE) * fte
     total_salary = salary_before + salary_after
-    
+
     return {
         "Level": level,
         "Base Level": base_level,
         "Start Date": start_date.date(),
         "End Date": end_date.date(),
         "FTE": fte,
-        "Working Days Before Increase": work_before,
-        "Working Days After Increase": work_after,
-        "Paid Days Before Increase": paid_before,
-        "Paid Days After Increase": paid_after,
-        "Daily Salary (with costs)": round(daily_salary,2),
-        "Total Salary": round(total_salary,2)
+        "Days Before 1 Jul 2026": days_before,
+        "Days After 1 Jul 2026": days_after,
+        "Working Days Before": round(working_days_before, 2),
+        "Working Days After": round(working_days_after, 2),
+        "Annual Leave Before": round(annual_leave_before, 2),
+        "Annual Leave After": round(annual_leave_after, 2),
+        "Paid Days Total": round(total_paid_days, 2),
+        "Daily Salary (with costs)": round(daily_rate_with_costs, 2),
+        "Total Salary ($)": round(total_salary, 2)
     }
 
 # -----------------------------
 # Streamlit UI
 # -----------------------------
-st.title("Interactive Salary Calculator (Annual Leave Paid, Holidays Excluded)")
+st.title("Salary Calculator – 5.2% Increase on 1 July 2026 (with Annual Leave)")
 
 level = st.selectbox("Select LEVEL:", sorted(df['LEVEL'].unique()))
 base_level = st.selectbox("Select Base Level:", sorted(df['Base Level'].unique()))
 start_date = st.date_input("Start Date", datetime(2026,3,1))
-end_date = st.date_input("End Date", datetime(2026,9,30))
+end_date = st.date_input("End Date", datetime(2027,3,1))
 fte = st.slider("FTE (Full-time equivalent)", 0.1, 1.0, 1.0, 0.05)
 
 if st.button("Calculate Salary"):
     result = calculate_salary(level, base_level, start_date, end_date, fte)
     st.write("### Salary Details")
     st.json(result)
-    
-    # Optional: CSV download
+
     df_result = pd.DataFrame([result])
     buffer = BytesIO()
     df_result.to_csv(buffer, index=False)
@@ -137,9 +131,5 @@ if st.button("Calculate Salary"):
         file_name="salary_details.csv",
         mime="text/csv"
     )
-
-
-
-
 
 
