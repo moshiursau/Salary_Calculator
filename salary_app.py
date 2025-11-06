@@ -23,11 +23,11 @@ data = {
         'Base'
     ],
     'Yearly Salary': [
-        78092,82475,86856,91242,94802,98367,101927,105484,
-        110967,115079,119182,123295,127404,131514,
-        135621,139734,143838,147953,152056,156172,
-        163017,168496,173973,179452,
-        209591
+        78092.13,82474.71,86856.20,91242.03,94802.19,98366.69,101926.86,105483.78,
+        110966.87,115078.92119,182.31,123295.44,127404.24,131514.13,
+        135620.77,139733.90,143838.37,147952.58,152055.98,156172.35,
+        163016.75,168495.51,173973.19,179451.96,
+        209591.11
     ]
 }
 
@@ -37,10 +37,10 @@ df = pd.DataFrame(data)
 # -----------------------------
 # Configuration
 # -----------------------------
-WORKING_DAYS_PER_YEAR = 227
+WORKING_DAYS_PER_YEAR = 247
 ON_COST_RATE = 0.377
 SALARY_INCREASE_DATE = datetime(2026,7,1)
-SALARY_INCREASE_RATE = 0.035
+SALARY_INCREASE_RATE = 0.052
 
 df['Daily Salary'] = df['Yearly Salary'] / WORKING_DAYS_PER_YEAR
 df['Daily Salary (with on-costs)'] = df['Daily Salary'] * (1 + ON_COST_RATE)
@@ -110,3 +110,4 @@ if st.button("Calculate Salary"):
         file_name="salary_details.csv",
         mime="text/csv"
     )
+
